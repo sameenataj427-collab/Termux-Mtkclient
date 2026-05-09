@@ -33,6 +33,7 @@ pip install .
 ```
 
 **Common Commands**
+
 ​**Dump Boot and VBMeta**
 ```bash
 ​python3 mtk.py r boot,vbmeta boot.img,vbmeta.img
