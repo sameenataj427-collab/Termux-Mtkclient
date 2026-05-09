@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# MTK Flash Client (c) B.Kerler 2018-2025.
-# Licensed under GPLv3 License
 import os
 import logging
 from struct import unpack
@@ -11,102 +9,114 @@ from mtkclient.Library.mtk_preloader import Preloader
 from mtkclient.Library.DA.mtk_daloader import DAloader
 from mtkclient.Library.Port import Port
 from mtkclient.Library.gui_utils import LogBase, logsetup
-from mtkclient.Library.utils import find_binary
 from mtkclient.Library.error import ErrorHandler
-
-
-def split_by_n(seq, unit_count):
-    """A generator to divide a sequence into chunks of n units."""
-    while seq:
-        yield seq[:unit_count]
-        seq = seq[unit_count:]
-
 
 class Mtk(metaclass=LogBase):
     def __init__(self, config, loglevel=logging.INFO, serialportname: str = None, preinit=True):
         self.config = config
-        self.loader = config.loader
-        self.vid = config.vid
-        self.pid = config.pid
-        self.interface = config.interface
         self.pathconfig = PathConfig()
-        self.reinited = False
-        self.__logger, self.info, self.debug, self.warning, self.error = logsetup(self, self.__logger, loglevel,
-                                                                                  config.gui)
+        self.__logger, self.info, self.debug, self.warning, self.error = logsetup(self, None, loglevel, config.gui)
         self.eh = ErrorHandler()
-        self.serialportname = serialportname
+        self.serialportname = serialportname or os.environ.get("TERMUX_USB_FD")
+        
         if preinit:
-            self.setup(self.vid, self.pid, self.interface, serialportname)
+            self.setup(config.vid, config.pid, config.interface, self.serialportname)
 
-    def patch_preloader_security_da1(self, data):
-        patched = False
-        data = bytearray(data)
-        patches = [
-            ("A3687BB12846", "0123A3602846", "oppo security"),
-            ("B3F5807F01D1", "B3F5807F01D14FF000004FF000007047", "mt6739 c30"),
-            ("B3F5807F04BF4FF4807305F011B84FF0FF307047", "B3F5807F04BF4FF480734FF000004FF000007047", "regular"),
-            ("10B50C680268", "10B5012010BD", "ram blacklist"),
-            ("08B5104B7B441B681B68", "00207047000000000000", "seclib_sec_usbdl_enabled"),
-            ("5072656C6F61646572205374617274", "50617463686564204C205374617274", "Patched loader msg"),
-            ("F0B58BB002AE20250C460746", "002070470000000000205374617274", "sec_img_auth"),
-            ("FFC0F3400008BD", "FF4FF0000008BD", "get_vfy_policy"),
-            ("040007C0", "00000000", "hash_check"),
-            ("CCF20709", "4FF00009", "hash_check2"),
-            (b"\x14\x2C\xF6.\xFE\xE7", b"\x00\x00\x00\x00\x00\x00", "hash_check3")
-        ]
-        i = 0
-        for patchval in patches:
-            if type(patchval[0]) is bytes:
-                idx = find_binary(data, patchval[0])
-                if idx is None:
-                    idx = -1
-                else:
-                    data[idx:idx + len(patchval)] = patchval
-                    self.info(f'Patched "{patchval[2]}" in preloader')
-                    patched = True
-            else:
-                pattern = bytes.fromhex(patchval[0])
-                idx = data.find(pattern)
-                if idx != -1:
-                    patch = bytes.fromhex(patchval[1])
-                    data[idx:idx + len(patch)] = patch
-                    self.info(f'Patched "{patchval[2]}" in preloader')
-                    patched = True
-                    # break
-            i += 1
-        if not patched:
-            self.warning("Failed to patch preloader security")
+    def setup(self, vid=None, pid=None, interface=None, serialportname: str = None):
+        if serialportname:
+            self.port = Port(mtk=self, portconfig=[], serialportname=serialportname, loglevel=self.__logger.level)
         else:
-            # with open("preloader.patched", "wb") as wf:
-            #    wf.write(data)
-            #    print("Patched !")
-            # self.info(f"Patched preloader security: {hex(i)}")
-            data = data
-        return data
+            portconfig = [[vid, pid, interface or -1]] if vid and vid != -1 else default_ids
+            self.port = Port(mtk=self, portconfig=portconfig, loglevel=self.__logger.level)
+            
+        self.preloader = Preloader(self, self.__logger.level)
+        self.daloader = DAloader(self, self.__logger.level)
 
-    def patch_preloader_security_da2(self, data):
-        patched = False
+    def parse_preloader(self, preloader):
+        if isinstance(preloader, str) and os.path.exists(preloader):
+            with open(preloader, "rb") as rf:
+                data = rf.read()
+        else:
+            data = preloader
         data = bytearray(data)
-        patches = [
-            ("A3687BB12846", "0123A3602846", "oppo security"),
-            ("B3F5807F01D1", "B3F5807F01D14FF000004FF000007047", "mt6739 c30"),
-            ("B3F5807F04BF4FF4807305F011B84FF0FF307047", "B3F5807F04BF4FF480734FF000004FF000007047", "regular"),
-            ("10B50C680268", "10B5012010BD", "ram blacklist"),
-            ("08B5104B7B441B681B68", "00207047000000000000", "seclib_sec_usbdl_enabled"),
-            ("5072656C6F61646572205374617274", "50617463686564204C205374617274", "Patched loader msg"),
-            ("F0B58BB002AE20250C460746", "002070470000000000205374617274", "sec_img_auth"),
-            ("FFC0F3400008BD", "FF4FF0000008BD", "get_vfy_policy")
-        ]
-        i = 0
-        for patchval in patches:
-            pattern = bytes.fromhex(patchval[0])
-            idx = data.find(pattern)
-            if idx != -1:
-                patch = bytes.fromhex(patchval[1])
-                data[idx:idx + len(patch)] = patch
-                self.info(f'Patched "{patchval[2]}" in preloader')
-                patched = True
-                # break
+        if data[:4] == b'\x4d\x4d\x4d\x01':
+            jump_offset = unpack("<I", data[0x30:0x34])[0]
+            daaddr = unpack("<I", data[0x1C:0x20])[0] + jump_offset
+            return daaddr, data[jump_offset:]
+        return self.config.chipconfig.da_payload_addr, data
+
+    def bypass_security(self):
+        plt = PLTools(self, self.__logger.level)
+        payload_path = self.config.payloadfile or os.path.join(self.pathconfig.get_payloads_path(), "generic_patcher_payload.bin")
+        if os.path.exists(payload_path):
+            return plt.runpayload(filename=payload_path)
+        return False
+
+    def crasher(self, display=True, mode=None):
+        plt = PLTools(self, self.__logger.level)
+        modes = [mode] if mode is not None else range(3)
+        for m in modes:
+            try:
+                plt.crash(m)
+                if self.preloader.init(): return True
+            except: continue
+        return False
+         plt.crash(m)
+                if self.preloader.init(): return True
+            except: continue
+        return False
+ defaults if no header found
+        return self.config.chipconfig.da_payload_addr, data
+
+    def run_exploit(self, mode=None):
+        """
+        Universal Exploit Wrapper.
+        Calls the full PLTools library to support kamakiri, amonet, etc.
+        """
+        plt = PLTools(self, self.__logger.level)
+        try:
+            if mode:
+                return plt.run_exploit(mode)
+            else:
+                # Default to automatic detection
+                return plt.run_exploit()
+        except Exception as e:
+            self.error(f"Exploit failed: {str(e)}")
+            return False
+
+    def bypass_security(self):
+        """
+        Supports the generic security bypass used by standard MTK client.
+        Relies on the external payloads directory to keep this file clean.
+        """
+        plt = PLTools(self, self.__logger.level)
+        payload_path = self.config.payloadfile or os.path.join(self.pathconfig.get_payloads_path(), "generic_patcher_payload.bin")
+        
+        if os.path.exists(payload_path):
+            if plt.runpayload(filename=payload_path):
+                # Re-handshake after payload execution to confirm BROM access
+                self.port.run_handshake()
+                return True
+        self.error("Universal security bypass failed or payload missing.")
+        return False
+
+    def get_device_info(self):
+        """Standard MTK command to retrieve hardware IDs."""
+        return self.preloader.get_hw_info()
+
+    def crasher(self, display=True, mode=None):
+        """Universal BROM crasher for forcing devices into the correct mode."""
+        plt = PLTools(self, self.__logger.level)
+        modes = [mode] if mode is not None else range(3)
+        for m in modes:
+            try:
+                plt.crash(m)
+                if self.preloader.init(): 
+                    return True
+            except: 
+                continue
+        return False
+         # break
             i += 1
         if not patched:
             self.warning("Failed to patch preloader security")
