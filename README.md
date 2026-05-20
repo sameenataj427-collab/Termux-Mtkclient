@@ -10,14 +10,20 @@ Mtkclient-NoRoot-Termux
 
 ​**How to use the tool**
 1. ​First run the command you want.
+
 2.​Then press Enter and wait for the text "Waiting for device connection...".
-3. ​Then connect your target phone by holding its Volume Up and Volume Down buttons to the host phone via OTG.
-4. ​Then quickly press OK on the Termux API popup as soon as it appears.
-5. ​Then the script will handle the rest.
+
+3. ​Then connect your target phone by holding its Volume Up and Volume Down buttons to the host phone via OTG or a type c to type c cable
+
+4. if you are using a otg, tge otg should be connected to the host phone, not the target phone
+
+5. ​Then quickly press OK on the Termux API popup as soon as it appears, as you only have ~3 seconds befor the target phone timeouts snd reboots.
+
+6. ​Then the scripts will handle the rest.
 
 # Guid To Install The Tool 👇👇
 
-First install Termux and Termux:api from Fdroid or GitHub, dont use termux from playstore, that is a outdated version and it doesn't have the nessary pakages for the tool to run
+First install [Termux](https://f-droid.org/repo/com.termux_1022.apk) and [Termux:api](https://f-droid.org/repo/com.termux.api_1002.apk) from Fdroid or GitHub, dont use termux from playstore, that is a outdated version and it doesn't have the nessary pakages for the tool to run
 
 ```bash
 ​pkg update && pkg upgrade -y
